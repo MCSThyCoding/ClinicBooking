@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="topbar">
+  <div class="brand brand-sm">
+    <span class="brand-mark">+</span>
+    <span class="brand-name">ClinicBook · Phnom Penh</span>
+  </div>
+  <nav class="tabs">
+    {% for t in tabs %}
+    <button class="tab {{ 'active' if t == default_tab }}" data-tab="{{ t }}">
+      {{ t|capitalize }}
+    </button>
+    {% endfor %}
+  </nav>
+  <div class="user-chip">
+    <span class="avatar">{{ user.name.split()|map('first')|join('')|upper }}</span>
+    <span>{{ user.name }}</span>
+    <a href="{{ url_for('logout') }}" class="logout">Log out</a>
+  </div>
+</header>
+
+<main class="page">
+
+  <!-- ============================ PATIENT TAB ============================ -->
+  <section id="tab-patient" class="tab-pane {{ 'hidden' if default_tab != 'patient' }}">
+    <div class="grid-2">
+
+      <!-- Booking flow -->
+      <div class="card">
+        <h2>Book an appointment</h2>
+        <p class="muted">Choose a doctor, a time, then pay a small deposit with KHQR.</p>
+
+        <h3 class="step-title"><span class="step-num">1</span> Doctor</h3>
+        <div class="doctor-grid" id="doctorGrid">
+          {% for d in doctors %}
+          <button class="doctor-card" type="button"
+                  data-id="{{ d.id }}" data-name="{{ d.doctor_name }}"
+                  data-fee="{{ d.consultation_fee }}">
+            <span class="doc-avatar">{{ (d.doctor_name.split()|map('first')|join(''))[2:] }}</span>
+            <span class="doc-info">
+              <strong>{{ d.doctor_name }}</strong>
+              <span class="muted">{{ d.specialization }}</span>
+            </span>
+            <span class="doc-fee">${{ '%.0f'|format(d.consultation_fee) }}</span>
+          </button>
+          {% endfor %}
+        </div>
+
+        <h3 class="step-title"><span class="step-num">2</span> Date and time</h3>
+        <div class="date-row" id="dateRow">
+          {% for d in dates %}
+          <button class="date-chip" type="button" data-date="{{ d.isoformat() }}">
+            <span class="d-day">{{ d.strftime('%a') }}</span>
+            <span class="d-num">{{ d.day }}</span>
+          </button>
+          {% endfor %}
+        </div>
+        <div class="slot-grid" id="slotGrid">
+          <p class="muted" id="slotHint">Pick a doctor and date to see times.</p>
+        </div>
+
+        <button class="btn btn-primary btn-block" id="btnContinue" disabled>
+          Continue to deposit
+        </button>
+      </div>
+
+      <!-- My bookings -->
+      <div class="card">
+        <h2>My bookings</h2>
+        {% if my_bookings %}
+        <ul class="booking-list">
+          {% for a in my_bookings %}
+          <li class="booking-item" data-id="{{ a.id }}">
+            <div class="doc-avatar sm">{{ (a.doctor_name.split()|map('first')|join(''))[2:] }}</div>
+            <div class="booking-info">
+              <strong>{{ a.doctor_name }}</strong>
+              <span class="muted">{{ a.specialization }} · ${{ '%.0f'|format(a.consultation_fee) }}</span>
+              <span class="muted">{{ a.appointment_date }} at {{ a.appointment_time }}</span>
+            </div>
+            <div class="booking-side">
+              <span class="badge badge-{{ 'paid' if a.payment_status == 'PAID' else 'unpaid' }}">
+                {{ a.payment_status }}
+              </span>
+              <span class="badge st-{{ a.status|lower }}">{{ a.status.replace('_',' ') }}</span>
+              <div class="booking-actions">
+                {% if a.payment_status != 'PAID' %}
+                <button class="btn btn-small btn-pay" data-id="{{ a.id }}">Pay deposit</button>
+                {% endif %}
+                {% if a.status in ['PENDING','CONFIRMED'] %}
+                <button class="btn btn-small btn-ghost btn-cancel" data-id="{{ a.id }}">Cancel</button>
+                {% endif %}
+              </div>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No upcoming bookings yet — pick a doctor on the left to book.</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ DOCTOR TAB ============================ -->
+  <section id="tab-doctor" class="tab-pane {{ 'hidden' if default_tab != 'doctor' }}">
+    <div class="card">
+      <div class="doctor-head">
+        <div>
+          <h2>Today's patients</h2>
+          <p class="muted">{{ queue_doctor.doctor_name }} · {{ queue_doctor.specialization }} ·
+            {{ queue|length }} appointment{{ 's' if queue|length != 1 }}</p>
+        </div>
+        {% if doctors|length > 1 and user.role != 'PATIENT' %}
+        <form method="get" action="{{ url_for('dashboard') }}" class="doc-switch">
+          <input type="hidden" name="tab" value="doctor">
+          <select name="doc" onchange="this.form.submit()">
+            {% for d in doctors %}
+            <option value="{{ d.id }}" {{ 'selected' if d.id == queue_doctor.id }}>
+              {{ d.doctor_name }}
+            </option>
+            {% endfor %}
+          </select>
+        </form>
+        {% endif %}
+      </div>
+
+      <table class="queue-table">
+        <thead>
+          <tr><th>Time</th><th>Patient</th><th>Payment</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          {% for a in queue %}
+          <tr data-id="{{ a.id }}">
+            <td class="t-time">{{ a.appointment_time }}</td>
+            <td>
+              <strong>{{ a.patient_name }}</strong><br>
+              <span class="muted">{{ a.patient_phone }}</span>
+            </td>
+            <td><span class="badge badge-{{ 'paid' if a.payment_status == 'PAID' else 'unpaid' }}">{{ a.payment_status }}</span></td>
+            <td><span class="badge st-{{ a.status|lower }}">{{ a.status.replace('_',' ') }}</span></td>
+            <td class="actions">
+              {% if a.status == 'PENDING' %}
+              <button class="btn btn-small" data-status="CONFIRMED">Confirm</button>
+              {% elif a.status == 'CONFIRMED' %}
+              <button class="btn btn-small" data-status="IN_CONSULTATION">Start consult</button>
+              {% elif a.status == 'IN_CONSULTATION' %}
+              <button class="btn btn-small btn-success" data-status="COMPLETED">Complete</button>
+              {% endif %}
+              {% if a.status not in ['COMPLETED','CANCELLED','NO_SHOW'] %}
+              <button class="btn btn-small btn-ghost" data-status="NO_SHOW">No-show</button>
+              <button class="btn btn-small btn-ghost" data-status="CANCELLED">Cancel</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="muted">No appointments today.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Medical records -->
+    {% if recordable %}
+    <div class="card">
+      <h2>Medical record</h2>
+      {% for a in recordable %}
+      {% set rec = record_by_patient.get(a.id) %}
+      <div class="record-box" data-appt="{{ a.id }}">
+        <div class="record-head">
+          <strong>{{ a.patient_name }}</strong>
+          <span class="muted">Visit {{ today }}, {{ a.appointment_time }}</span>
+        </div>
+        <label>Diagnosis</label>
+        <textarea class="rec-diagnosis" rows="2"
+          placeholder="e.g. Seasonal flu, mild fever for 2 days.">{{ rec.diagnosis if rec else '' }}</textarea>
+        <label>Prescription</label>
+        <textarea class="rec-prescription" rows="2"
+          placeholder="e.g. Paracetamol 500mg every 6 hours…">{{ rec.prescription if rec else '' }}</textarea>
+        <div class="record-foot">
+          <input type="text" class="rec-attachment" placeholder="Attachment URL (optional)"
+                 value="{{ rec.attachment_url if rec else '' }}">
+          <button class="btn btn-small btn-primary btn-save-rec">Save record</button>
+          <span class="rec-status muted"></span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- ============================ ADMIN TAB ============================ -->
+  <section id="tab-admin" class="tab-pane {{ 'hidden' if default_tab != 'admin' }}">
+    <div class="card">
+      <h2>Clinic overview</h2>
+      <p class="muted">This week across all doctors.</p>
+      <div class="stat-grid">
+        <div class="stat"><span class="stat-num">{{ stats.appointments_week }}</span><span class="stat-label">Appointments</span></div>
+        <div class="stat"><span class="stat-num">${{ '%.0f'|format(stats.deposits) }}</span><span class="stat-label">Deposits collected</span></div>
+        <div class="stat"><span class="stat-num">{{ stats.no_show_rate }}%</span><span class="stat-label">No-show rate</span></div>
+        <div class="stat"><span class="stat-num">{{ stats.active_doctors }}</span><span class="stat-label">Active doctors</span></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>Appointments per day</h3>
+        <div class="bar-chart">
+          {% set maxc = chart|map(attribute='count')|max %}
+          {% for c in chart %}
+          <div class="bar-col">
+            <div class="bar" style="height: {{ (c.count / maxc * 120) if maxc else 4 }}px"
+                 title="{{ c.count }} appointments"></div>
+            <span class="bar-label {{ 'today' if c.is_today }}">{{ c.label }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Doctor schedules</h3>
+        <table class="queue-table">
+          <thead><tr><th>Doctor</th><th>Days</th><th>Hours</th><th>Slot</th></tr></thead>
+          <tbody>
+            {% for name, rows in schedule_groups %}
+            <tr>
+              <td><strong>{{ name }}</strong></td>
+              <td>{{ rows|map(attribute='day_name')|join(', ') }}</td>
+              <td>{{ rows[0].start_time }}–{{ rows[0].end_time }}</td>
+              <td>{{ rows[0].slot_duration_mins }} min</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Deposit / KHQR modal -->
+<div class="modal hidden" id="payModal">
+  <div class="modal-card">
+    <h3>Pay deposit</h3>
+    <p class="muted" id="paySummary"></p>
+    <div class="qr-box">KHQR<br><span>Scan with ABA app</span></div>
+    <p class="pay-amount" id="payAmount"></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="payCancel">Cancel</button>
+      <button class="btn btn-primary" id="payConfirm">I have paid</button>
+    </div>
+  </div>
+</div>
+{% endblock %}

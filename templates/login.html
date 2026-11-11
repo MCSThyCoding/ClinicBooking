@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="brand">
+      <span class="brand-mark">+</span>
+      <div>
+        <h1>ClinicBook</h1>
+        <p>Phnom Penh</p>
+      </div>
+    </div>
+    <p class="muted">Sign in to manage appointments</p>
+    <form method="POST" action="{{ url_for('login') }}">
+      <label>Email or phone</label>
+      <input type="text" name="email" placeholder="admin@clinicbook.kh" required autofocus>
+      <label>Password</label>
+      <input type="password" name="password" placeholder="demo123" required>
+      <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+    </form>
+    <div class="login-hint">
+      <strong>Demo accounts</strong> (password: <code>demo123</code>)<br>
+      Admin: admin@clinicbook.kh · Doctor: sokha@clinicbook.kh · Patient: demo@demo.com
+    </div>
+  </div>
+</div>
+{% endblock %}
