@@ -80,7 +80,16 @@ async function loadSlots() {
 
 // ---------- deposit modal ----------
 const payModal = document.getElementById("payModal");
+const payQr = document.getElementById("payQr");
 let pendingApptId = null;
+
+function openPayModal(apptId, summary, amountText) {
+  pendingApptId = apptId;
+  document.getElementById("paySummary").textContent = summary;
+  document.getElementById("payAmount").textContent = amountText;
+  payQr.src = `/api/appointments/${apptId}/qr.png`;
+  payModal.classList.remove("hidden");
+}
 
 btnContinue?.addEventListener("click", async () => {
   btnContinue.disabled = true;
@@ -95,12 +104,12 @@ btnContinue?.addEventListener("click", async () => {
     refreshContinue();
     return;
   }
-  pendingApptId = data.appointment.id;
   const est = Math.round(state.fee * 0.5 * 100) / 100;
-  document.getElementById("paySummary").textContent =
-    `${state.doctorName} · ${state.date} at ${state.time}`;
-  document.getElementById("payAmount").textContent = `$${est.toFixed(2)} deposit`;
-  payModal.classList.remove("hidden");
+  openPayModal(
+    data.appointment.id,
+    `${state.doctorName} · ${state.date} at ${state.time}`,
+    `$${est.toFixed(2)} deposit`
+  );
 });
 
 document.getElementById("payCancel")?.addEventListener("click", () => {
@@ -121,9 +130,17 @@ document.getElementById("payConfirm")?.addEventListener("click", async () => {
 // ---------- my bookings: pay / cancel ----------
 document.querySelectorAll(".btn-pay").forEach((btn) => {
   btn.addEventListener("click", async () => {
-    const res = await fetch(`/api/appointments/${btn.dataset.id}/pay`, { method: "POST" });
-    if (res.ok) location.reload();
-    else alert("Payment failed");
+    const res = await fetch(`/api/appointments/${btn.dataset.id}`);
+    if (!res.ok) { alert("Could not load booking"); return; }
+    const a = await res.json();
+    const amount = a.deposit_amount > 0
+      ? `$${a.deposit_amount.toFixed(2)} deposit`
+      : "Deposit (see QR)";
+    openPayModal(
+      a.id,
+      `${a.doctor_name} · ${a.appointment_date} at ${a.appointment_time}`,
+      amount
+    );
   });
 });
 document.querySelectorAll(".btn-cancel").forEach((btn) => {

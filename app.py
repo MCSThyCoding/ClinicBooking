@@ -10,13 +10,15 @@ Demo accounts (password: demo123):
     demo@demo.com         -> Patient booking  (Demo Patient)
 """
 
+import io
 import sqlite3
 import uuid
 from datetime import date, datetime, timedelta
 from functools import wraps
 
+import qrcode
 from flask import (Flask, abort, flash, jsonify, redirect, render_template,
-                   request, session, url_for)
+                   request, send_file, session, url_for)
 from werkzeug.security import check_password_hash
 
 import db
@@ -352,15 +354,19 @@ def create_appointment():
         return jsonify({"error": "That time is no longer available"}), 409
 
     conn = db.get_db()
+    fee = conn.execute(
+        "SELECT consultation_fee FROM doctors WHERE id = ?",
+        (doctor_id,)).fetchone()["consultation_fee"]
+    deposit = round(fee * 0.5, 2)  # 50% deposit, stored so QR shows exact amount
     appt_id = uuid.uuid4().hex[:12]
     try:
         conn.execute(
             """INSERT INTO appointments
                (id,patient_id,doctor_id,appointment_date,appointment_time,
                 status,payment_status,deposit_amount,created_at)
-               VALUES (?,?,?,?,?,'PENDING','UNPAID',0,?)""",
+               VALUES (?,?,?,?,?,'PENDING','UNPAID',?,?)""",
             (appt_id, user["id"], doctor_id, day.isoformat(), t,
-             datetime.now().isoformat(timespec="seconds")),
+             deposit, datetime.now().isoformat(timespec="seconds")),
         )
         conn.commit()
     except sqlite3.IntegrityError:
@@ -403,6 +409,71 @@ def pay_appointment(appt_id):
     conn.commit()
     conn.close()
     return jsonify({"ok": True, "deposit": deposit})
+
+
+@app.route("/api/appointments/<appt_id>")
+@require_login
+def get_appointment(appt_id):
+    """Details needed to show the payment modal for an existing booking."""
+    user = current_user()
+    conn = db.get_db()
+    row = conn.execute(
+        """SELECT a.*, u.name AS patient_name, u.id AS patient_id2,
+                  du.name AS doctor_name, d.consultation_fee
+           FROM appointments a
+           JOIN users u ON u.id = a.patient_id
+           JOIN doctors d ON d.id = a.doctor_id
+           JOIN users du ON du.id = d.user_id
+           WHERE a.id = ?""", (appt_id,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    d = dict(row)
+    if (d["patient_id"] != user["id"]
+            and user["role"] not in ("ADMIN", "CLINIC_STAFF", "DOCTOR")):
+        return jsonify({"error": "forbidden"}), 403
+    d.pop("patient_id2", None)
+    return jsonify(d)
+
+
+@app.route("/api/appointments/<appt_id>/qr.png")
+@require_login
+def appointment_qr(appt_id):
+    """
+    Render a real, scannable QR code for the deposit payment.
+
+    The QR encodes a short payment payload (clinic, doctor, schedule,
+    amount, reference). A banking app can scan it — in production this
+    payload would be a real KHQR / ABA PayWay string.
+    """
+    user = current_user()
+    conn = db.get_db()
+    row = conn.execute(
+        """SELECT a.*, du.name AS doctor_name, d.consultation_fee
+           FROM appointments a
+           JOIN doctors d ON d.id = a.doctor_id
+           JOIN users du ON du.id = d.user_id
+           WHERE a.id = ?""", (appt_id,)).fetchone()
+    conn.close()
+    if not row:
+        return "not found", 404
+    if (row["patient_id"] != user["id"]
+            and user["role"] not in ("ADMIN", "CLINIC_STAFF", "DOCTOR")):
+        return "forbidden", 403
+
+    deposit = row["deposit_amount"] or round(row["consultation_fee"] * 0.5, 2)
+    payload = (
+        "ClinicBook - Phnom Penh\n"
+        f"Doctor: {row['doctor_name']}\n"
+        f"Visit: {row['appointment_date']} {row['appointment_time']}\n"
+        f"Deposit: ${deposit:.2f}\n"
+        f"Ref: {appt_id}"
+    )
+    img = qrcode.make(payload, box_size=8, border=2)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return send_file(buf, mimetype="image/png")
 
 
 @app.route("/api/appointments/<appt_id>/status", methods=["POST"])

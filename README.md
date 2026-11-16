@@ -28,7 +28,10 @@ created automatically on first run.
 **Patient tab**
 - Pick a doctor → pick a date → pick a free time slot (slots are generated
   from each doctor's weekly schedule and exclude already-booked times)
-- KHQR-style deposit payment (simulated — 50% of the consultation fee)
+- KHQR-style deposit payment — the modal shows a **real scannable QR code**
+  (`/api/appointments/<id>/qr.png`) encoding doctor, schedule, amount and
+  reference, so it can be scanned from another device. The "I have paid"
+  button simulates payment confirmation (50% of the consultation fee)
 - View / pay / cancel upcoming bookings
 
 **Doctor tab**
